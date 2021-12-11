@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SAM Template for CoinMarketCap script
+
+Parameters:
+  ParameterCMCApiKey:
+    Type: String
+    Default: "a5c04041-a7e5-4744-8547-bacb284c52c2"
+  ParameterBucketName:
+    Type: String
+    Default: "cmc-history"
+  ParameterCoinTableName:
+    Type: String
+    Default: "cmc-coins"
+  ParameterEnvStage:
+    Type: String
+    Default: "prod"
+
+Globals:
+  Function:
+    Runtime: python3.8
+    CodeUri: src
+    Layers:
+      - !Ref ExternalDepsLayer
+
+Resources:
+
+  # Define S3 bucket
+  EngineBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ParameterBucketName
+
+  # DynamoDB tables
+  CoinTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref ParameterCoinTableName
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: N
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  # https://docs.aws.amazon.com/lambda/latest/dg/configuration-layers.html
+  ExternalDepsLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      ContentUri: externalDepsLayer/python
+      Description: Lambda layer to share python dependencies.
+      RetentionPolicy: Delete
+    Metadata:
+      BuildMethod: python3.8
+
+  CMCEngineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.lambda_handler
+      Timeout: 900
+      MemorySize: 1024
+      Environment:
+        Variables:
+          CMC_API_KEY: !Ref ParameterCMCApiKey
+          BUCKET_NAME: !Ref ParameterBucketName
+          COIN_TABLE_NAME: !Ref ParameterCoinTableName
+          ENV_STAGE: !Ref ParameterEnvStage
+      Events:
+        CloudWatchEvent:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 */1 * * ? *)
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref EngineBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ParameterCoinTableName
+
+Outputs:
+  EngineS3Bucket:
+    Description: "S3 bucket for Coins website page"
+    Value: !Ref EngineBucket
+  EngineS3BucketArn:
+    Description: "EngineS3Bucket ARN"
+    Value: !GetAtt EngineBucket.Arn
+  CoinTable:
+    Description: "DynamoDb table for Coins"
+    Value: !Ref CoinTable
+  CoinTableArn:
+    Description: "CoinTable ARN"
+    Value: !GetAtt CoinTable.Arn
+  CMCEngineFunction:
+    Description: "Lambda function to execute the CMC engine"
+    Value: !GetAtt CMCEngineFunction.Arn
